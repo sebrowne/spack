@@ -9,6 +9,7 @@ from six import StringIO
 import pytest
 
 import llnl.util.filesystem as fs
+import llnl.util.link_tree
 
 import spack.hash_types as ht
 import spack.modules
@@ -207,10 +208,12 @@ def test_env_install_same_spec_twice(install_mockery, mock_fetch):
     with e:
         # The first installation outputs the package prefix, updates the view
         out = install('cmake-client')
+        print(out)
         assert 'Updating view at' in out
 
         # The second installation reports all packages already installed
         out = install('cmake-client')
+        print(out)
         assert 'already installed' in out
 
 
@@ -1084,7 +1087,7 @@ def test_store_different_build_deps():
 
 def test_env_updates_view_install(
         tmpdir, mock_stage, mock_fetch, install_mockery):
-    view_dir = tmpdir.mkdir('view')
+    view_dir = tmpdir.join('view')
     env('create', '--with-view=%s' % view_dir, 'test')
     with ev.read('test'):
         add('mpileaks')
@@ -1095,12 +1098,14 @@ def test_env_updates_view_install(
 
 def test_env_view_fails(
         tmpdir, mock_packages, mock_stage, mock_fetch, install_mockery):
-    view_dir = tmpdir.mkdir('view')
+    view_dir = tmpdir.join('view')
     env('create', '--with-view=%s' % view_dir, 'test')
     with ev.read('test'):
         add('libelf')
         add('libelf cflags=-g')
-        with pytest.raises(RuntimeError, match='merge blocked by file'):
+        with pytest.raises(llnl.util.link_tree.MergeConflictError,
+                           match='merge blocked by file'):
+#        with pytest.raises(RuntimeError, match='merge blocked by file'):
             install('--fake')
 
 
@@ -1113,7 +1118,7 @@ def test_env_without_view_install(
     with pytest.raises(spack.environment.SpackEnvironmentError):
         test_env.default_view
 
-    view_dir = tmpdir.mkdir('view')
+    view_dir = tmpdir.join('view')
 
     with ev.read('test'):
         add('mpileaks')
@@ -1148,7 +1153,7 @@ env:
 
 def test_env_updates_view_install_package(
         tmpdir, mock_stage, mock_fetch, install_mockery):
-    view_dir = tmpdir.mkdir('view')
+    view_dir = tmpdir.join('view')
     env('create', '--with-view=%s' % view_dir, 'test')
     with ev.read('test'):
         install('--fake', 'mpileaks')
@@ -1158,7 +1163,7 @@ def test_env_updates_view_install_package(
 
 def test_env_updates_view_add_concretize(
         tmpdir, mock_stage, mock_fetch, install_mockery):
-    view_dir = tmpdir.mkdir('view')
+    view_dir = tmpdir.join('view')
     env('create', '--with-view=%s' % view_dir, 'test')
     install('--fake', 'mpileaks')
     with ev.read('test'):
@@ -1170,7 +1175,7 @@ def test_env_updates_view_add_concretize(
 
 def test_env_updates_view_uninstall(
         tmpdir, mock_stage, mock_fetch, install_mockery):
-    view_dir = tmpdir.mkdir('view')
+    view_dir = tmpdir.join('view')
     env('create', '--with-view=%s' % view_dir, 'test')
     with ev.read('test'):
         install('--fake', 'mpileaks')
@@ -1185,7 +1190,7 @@ def test_env_updates_view_uninstall(
 
 def test_env_updates_view_uninstall_referenced_elsewhere(
         tmpdir, mock_stage, mock_fetch, install_mockery):
-    view_dir = tmpdir.mkdir('view')
+    view_dir = tmpdir.join('view')
     env('create', '--with-view=%s' % view_dir, 'test')
     install('--fake', 'mpileaks')
     with ev.read('test'):
@@ -1202,7 +1207,7 @@ def test_env_updates_view_uninstall_referenced_elsewhere(
 
 def test_env_updates_view_remove_concretize(
         tmpdir, mock_stage, mock_fetch, install_mockery):
-    view_dir = tmpdir.mkdir('view')
+    view_dir = tmpdir.join('view')
     env('create', '--with-view=%s' % view_dir, 'test')
     install('--fake', 'mpileaks')
     with ev.read('test'):
@@ -1220,7 +1225,7 @@ def test_env_updates_view_remove_concretize(
 
 def test_env_updates_view_force_remove(
         tmpdir, mock_stage, mock_fetch, install_mockery):
-    view_dir = tmpdir.mkdir('view')
+    view_dir = tmpdir.join('view')
     env('create', '--with-view=%s' % view_dir, 'test')
     with ev.read('test'):
         install('--fake', 'mpileaks')
@@ -2449,7 +2454,7 @@ def test_does_not_rewrite_rel_dev_path_when_keep_relative_is_set(tmpdir):
     """Relative develop paths should not be rewritten when --keep-relative is
        passed to create"""
     _, _, _, spack_yaml = _setup_develop_packages(tmpdir)
-    env('create', '--keep-relative', 'named_env', str(spack_yaml))
+    print(env('create', '--keep-relative', 'named_env', str(spack_yaml)))
     with ev.read('named_env') as e:
         print(e.dev_specs)
         assert e.dev_specs['mypkg1']['path'] == '../build_folder'
