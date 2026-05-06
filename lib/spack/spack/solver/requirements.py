@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import enum
-from typing import List, NamedTuple, Optional, Sequence, Tuple
+from typing import List, NamedTuple, Optional, Sequence, Tuple, Dict
 
 import spack.config
 import spack.error
@@ -14,6 +14,7 @@ import spack.traverse
 from spack.enums import PropagationPolicy
 from spack.llnl.util import tty
 from spack.util.spack_yaml import get_mark_from_yaml_data
+from spack.schema import override
 
 
 class RequirementKind(enum.Enum):
@@ -170,13 +171,39 @@ class RequirementParser:
 
         return result
 
+    def _get_package_specific_and_all_sections(self, pkg: spack.package_base.PackageBase, section: str) -> Dict[RequirementKind, List[str]]:
+        package_settings = {}
+
+        # Always grab the package-specific section, even if it's empty
+        kind, requirements = self._raw_yaml_data(pkg.name, section=section, fallback=False)
+        if not isinstance(requirements, list):
+            requirements = [requirements]
+        package_settings[kind] = requirements
+
+        # Grab the corresponding 'all' section if the package-specific section was NOT an explicit override
+        all_requirements = []
+        config = self.config.get_config("packages")
+        data = config.get(pkg.name, {})
+        maybekey = [k for k in data if k == section]
+        if not (maybekey and override(maybekey[0])):
+            _, all_requirements = self._raw_yaml_data("all", section=section)
+        if not isinstance(all_requirements, list):
+            all_requirements = [all_requirements]
+        package_settings[RequirementKind.DEFAULT] = all_requirements
+
+        return package_settings
+
     def rules_from_require(self, pkg: spack.package_base.PackageBase) -> List[RequirementRule]:
-        kind, requirements = self._raw_yaml_data(pkg.name, section="require")
-        return self._rules_from_requirements(pkg.name, requirements, kind=kind)
+        rules = []
+        for kind, requirements in self._get_package_specific_and_all_sections(pkg=pkg, section="require").items():
+            rules.extend(self._rules_from_requirements(pkg_name=pkg.name, requirements=requirements, kind=kind))
+        return rules
 
     def rules_from_prefer(self, pkg: spack.package_base.PackageBase) -> List[RequirementRule]:
-        kind, preferences = self._raw_yaml_data(pkg.name, section="prefer")
-        return self._rules_from_preferences(pkg.name, preferences=preferences, kind=kind)
+        rules = []
+        for kind, preferences in self._get_package_specific_and_all_sections(pkg=pkg, section="prefer").items():
+            rules.extend(self._rules_from_preferences(pkg_name=pkg.name, preferences=preferences, kind=kind))
+        return rules
 
     def _rules_from_preferences(
         self, pkg_name: str, *, preferences, kind: RequirementKind
@@ -216,7 +243,7 @@ class RequirementParser:
             message = item.get("message")
         return spec, condition, message
 
-    def _raw_yaml_data(self, pkg_name: str, *, section: str, virtual: bool = False):
+    def _raw_yaml_data(self, pkg_name: str, *, section: str, virtual: bool = False, fallback: bool = True):
         config = self.config.get_config("packages")
         data = config.get(pkg_name, {}).get(section, [])
         kind = RequirementKind.PACKAGE
@@ -224,7 +251,7 @@ class RequirementParser:
         if virtual:
             return RequirementKind.VIRTUAL, data
 
-        if not data:
+        if fallback and not data:
             data = config.get("all", {}).get(section, [])
             kind = RequirementKind.DEFAULT
         return kind, data
