@@ -170,13 +170,70 @@ class RequirementParser:
 
         return result
 
+    def _requirements_conflict(self, req1: str, req2: str) -> bool:
+            """Check if two requirements conflict with each other"""
+            spec1 = spack.spec.Spec(req1)
+            spec2 = spack.spec.Spec(req2)
+
+            # If they're the same requirement, they don't conflict
+            if str(spec1) == str(spec2):
+                return False
+
+            # Check if they're contradictory (one is more specific than the other)
+            # TODO: Check this, seems odd to check satisfies() for this (it seems inverted)
+            if spec1.satisfies(spec2) or spec2.satisfies(spec1):
+                return True
+
+            # Special handling for version requirements
+            if spec1.versions and spec2.versions:
+                v1 = spec1.versions[0]
+                v2 = spec2.versions[0]
+                if v1 != v2:
+                    return True
+
+            # Check for variant conflicts
+            for var in spec1.variants:
+                if var in spec2.variants:
+                    if spec1.variants[var] != spec2.variants[var]:
+                        return True
+
+            return False
+
     def rules_from_require(self, pkg: spack.package_base.PackageBase) -> List[RequirementRule]:
         kind, requirements = self._raw_yaml_data(pkg.name, section="require")
-        return self._rules_from_requirements(pkg.name, requirements, kind=kind)
+        if not isinstance(requirements, list):
+            requirements = [requirements]
+        _, all_requirements = self._raw_yaml_data("all", section="require")
+        if not isinstance(all_requirements, list):
+            all_requirements = [all_requirements]
+        final_all_reqs = []
+        if kind == RequirementKind.PACKAGE:
+            for requirement in all_requirements:
+                if not any([self._requirements_conflict(x, requirement) for x in requirements]):
+                    final_all_reqs.append(requirement)
+                else:
+                    tty.debug(f"Dropping global requirement {requirement} because it conflicts with package requirement(s) {requirements}")
+        else:
+            final_all_reqs = all_requirements
+        return self._rules_from_requirements(pkg_name=pkg.name, requirements=requirements, kind=kind) + self._rules_from_requirements(pkg_name=pkg.name, requirements=final_all_reqs, kind=RequirementKind.DEFAULT)
 
     def rules_from_prefer(self, pkg: spack.package_base.PackageBase) -> List[RequirementRule]:
         kind, preferences = self._raw_yaml_data(pkg.name, section="prefer")
-        return self._rules_from_preferences(pkg.name, preferences=preferences, kind=kind)
+        if not isinstance(preferences, list):
+            preferences = [preferences]
+        _, all_preferences = self._raw_yaml_data("all", section="prefer")
+        if not isinstance(all_preferences, list):
+            all_preferences = [all_preferences]
+        final_all_prefs = []
+        if kind == RequirementKind.PACKAGE:
+            for preference in all_preferences:
+                if not any([self._requirements_conflict(x, preference) for x in preferences]):
+                    final_all_prefs.append(preference)
+                else:
+                    tty.debug(f"Dropping global preference {preference} because it conflicts with package preference(s) {preferences}")
+        else:
+            final_all_prefs = all_preferences
+        return self._rules_from_preferences(pkg_name=pkg.name, preferences=preferences, kind=kind) + (self._rules_from_preferences(pkg_name=pkg.name, preferences=final_all_prefs, kind=RequirementKind.DEFAULT) if kind != RequirementKind.DEFAULT else [])
 
     def _rules_from_preferences(
         self, pkg_name: str, *, preferences, kind: RequirementKind
